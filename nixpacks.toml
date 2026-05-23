@@ -1,0 +1,8 @@
+[phases.install]
+cmds = ["npm ci --loglevel=error"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "node server/dist/index.js"
