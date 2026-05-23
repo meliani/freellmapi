@@ -3,7 +3,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY server/package*.json ./server/
 COPY client/package*.json ./client/
-RUN npm ci
+RUN npm ci --loglevel=error
 COPY . .
 RUN npm run build
 
