@@ -37,6 +37,35 @@ describe('toGeminiExtendedConfig', () => {
     expect((schema.properties as Record<string, unknown>).city).toBeDefined();
   });
 
+  it('nullable property (type: [X, "null"]) → single type + nullable: true', () => {
+    // OpenAI-style clients (and Laravel AI's ->nullable()) express nullability as a
+    // type union. Gemini's proto schema rejects a repeating `type` field outright
+    // (400: "Proto field is not repeating, cannot start list") — this must be
+    // translated to Gemini's own `nullable: true` flag instead of passed through.
+    const cfg = toGeminiExtendedConfig({
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'answer',
+          schema: {
+            type: 'object',
+            properties: {
+              estimated_value_mad: { type: ['number', 'null'], description: 'value' },
+              summary: { type: 'string' },
+            },
+            required: ['summary'],
+          },
+        },
+      },
+    });
+    const schema = cfg.responseSchema as Record<string, unknown>;
+    const props = schema.properties as Record<string, Record<string, unknown>>;
+    expect(props.estimated_value_mad.type).toBe('number');
+    expect(props.estimated_value_mad.nullable).toBe(true);
+    expect(props.summary.type).toBe('string');
+    expect(props.summary).not.toHaveProperty('nullable');
+  });
+
   it('skips JSON output entirely when tools are present (Gemini rejects the combination)', () => {
     const cfg = toGeminiExtendedConfig({
       response_format: { type: 'json_object' },

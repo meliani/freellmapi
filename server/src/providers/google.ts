@@ -226,6 +226,16 @@ function sanitizeForGeminiSchema(schema: unknown, insidePropertiesMap: boolean):
       if (GEMINI_UNSUPPORTED_SCHEMA_KEYS.has(k) || VENDOR_EXTENSION_SCHEMA_KEY.test(k)) continue;
       out[k] = sanitizeForGeminiSchema(v, k === 'properties');
     }
+    // JSON Schema expresses nullability as a `type` union (e.g. ["number", "null"],
+    // what OpenAI-style ->nullable() fields produce). Gemini's schema is proto-based:
+    // `type` is a single non-repeating enum value, so sending an array 400s with
+    // "Unknown name 'type' ... Proto field is not repeating, cannot start list."
+    // Translate to Gemini's own nullability flag instead.
+    if (Array.isArray(out.type)) {
+      const nonNullTypes = out.type.filter(t => t !== 'null');
+      if (out.type.length !== nonNullTypes.length) out.nullable = true;
+      out.type = nonNullTypes[0];
+    }
     return out;
   }
   return schema;
