@@ -5,6 +5,9 @@ server/data/
 *.db-wal
 *.db-shm
 *.bak
+# Auto-generated dev encryption key (written next to the SQLite DB when
+# ENCRYPTION_KEY is unset outside production). Never commit it.
+.encryption-key
 .env
 .env.local
 .DS_Store
@@ -12,3 +15,6 @@ server/data/
 # Personal deployment scripts (contain keys/credentials — kept local)
 deploy-pi.sh
 update-hermes.sh
+
+# Monetization planning — private, never committed
+monetization/
