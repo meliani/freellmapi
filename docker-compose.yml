@@ -1,26 +1,5 @@
 services:
   freellmapi:
-<<<<<<< HEAD
-    build: .
-    restart: unless-stopped
-    environment:
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
-    volumes:
-      - freellmapi_data:/app/data
-    networks:
-      - proxy-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.freellmapi.rule=Host(`freellm.rab.dc.microservice.ma`)"
-      - "traefik.http.services.freellmapi.loadbalancer.server.port=3001"
-
-volumes:
-  freellmapi_data:
-
-networks:
-  proxy-network:
-    external: true
-=======
     image: ghcr.io/tashfeenahmed/freellmapi:latest
     build:
       context: .
@@ -30,10 +9,11 @@ networks:
     environment:
       NODE_ENV: production
       PORT: 3001
-    # Bound to localhost by default — FreeLLMAPI is single-user and must not be
-    # exposed to the internet. Set HOST_BIND=0.0.0.0 to reach it from your LAN.
+    # Bound to all interfaces so it's reachable from the local network by IP
+    # (no auth is enabled, so keep it off the public internet — set
+    # HOST_BIND=127.0.0.1 to restrict to this machine only).
     ports:
-      - "${HOST_BIND:-127.0.0.1}:${PORT:-3001}:3001"
+      - "${HOST_BIND:-0.0.0.0}:${PORT:-3001}:3001"
     volumes:
       - freellmapi-data:/app/server/data
     restart: unless-stopped
@@ -49,7 +29,16 @@ networks:
       timeout: 5s
       start_period: 15s
       retries: 3
+    networks:
+      - proxy-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.freellmapi.rule=Host(`freellm.rab.dc.microservice.ma`)"
+      - "traefik.http.services.freellmapi.loadbalancer.server.port=3001"
 
 volumes:
   freellmapi-data:
->>>>>>> 4b96ea97b3909dfab19226b741319af5a83db76d
+
+networks:
+  proxy-network:
+    external: true

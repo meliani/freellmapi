@@ -1,22 +1,3 @@
-<<<<<<< HEAD
-FROM node:22-alpine AS build
-WORKDIR /app
-COPY package*.json ./
-COPY server/package*.json ./server/
-COPY client/package*.json ./client/
-RUN npm ci --loglevel=error
-COPY . .
-RUN npm run build
-
-FROM node:22-alpine
-WORKDIR /app
-ENV NODE_ENV=production
-COPY --from=build /app/server/dist ./server/dist
-COPY --from=build /app/client/dist ./client/dist
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/package.json ./
-EXPOSE 3001
-=======
 # syntax=docker/dockerfile:1.7
 
 ARG NODE_IMAGE=node:20-bookworm-slim
@@ -75,5 +56,4 @@ VOLUME ["/app/server/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3001) + '/api/ping').then((res) => { if (!res.ok) process.exit(1); }).catch(() => process.exit(1));"
 
->>>>>>> 4b96ea97b3909dfab19226b741319af5a83db76d
 CMD ["node", "server/dist/index.js"]

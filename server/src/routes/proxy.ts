@@ -2,17 +2,11 @@ import crypto from 'crypto';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-<<<<<<< HEAD
-import type { ChatMessage } from '@freellmapi/shared/types.js';
-import { routeRequest, recordRateLimitHit, recordSuccess, type RouteResult } from '../services/router.js';
-import { recordRequest, recordTokens, setCooldown, getNextCooldownDuration } from '../services/ratelimit.js';
-=======
 import type { ChatMessage, ChatToolCall, ModelListRow } from '@freellmapi/shared/types.js';
 import { routeRequest, resolveRoutingChain, resolveModelGroupCandidates, recordRateLimitHit, recordSuccess, hasEnabledVisionModel, hasEnabledToolsModel, hasOtherUsableKey, routingReserveTokens, type RouteResult, type ResolvedChain, type ChainRow } from '../services/router.js';
 import { recordRequest, recordTokens, setCooldown, getCooldownDurationForLimit, PAYMENT_REQUIRED_COOLDOWN_MS, MODEL_FORBIDDEN_COOLDOWN_MS, learnLimitFromError } from '../services/ratelimit.js';
 import { runEmbeddings, EmbeddingsError } from '../services/embeddings.js';
 import { runImageGeneration, runSpeech, MediaError } from '../services/media.js';
->>>>>>> 4b96ea97b3909dfab19226b741319af5a83db76d
 import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { contentToString, messageHasImage, normalizeOutboundContent, sanitizeResponse } from '../lib/content.js';
 import { repairToolArguments, toolSchemaMap } from '../lib/tool-args.js';
@@ -1902,22 +1896,6 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     },
     logFailure: (route, err, attempt) => {
       const latency = Date.now() - start;
-<<<<<<< HEAD
-      logRequest(route.platform, route.modelId, 'error', estimatedInputTokens, 0, latency, err.message);
-
-      if (isRetryableError(err)) {
-        // Put this model+key on cooldown and try the next one
-        const skipId = `${route.platform}:${route.modelId}:${route.keyId}`;
-        skipKeys.add(skipId);
-        setCooldown(route.platform, route.modelId, route.keyId, getNextCooldownDuration(route.platform, route.modelId, route.keyId));
-        recordRateLimitHit(route.modelDbId);
-        lastError = err;
-        console.log(`[Proxy] ${err.message.slice(0, 60)} from ${route.displayName}, falling back (attempt ${attempt + 1}/${MAX_RETRIES})`);
-        continue;
-      }
-
-      // Non-retryable error (auth, 4xx, etc.): don't retry
-=======
       const safeError = sanitizeProviderErrorMessage(err.message);
       traceRouteEvent('Proxy', {
         event: 'fail',
@@ -1933,7 +1911,6 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     onFatal: (route, err, attempt) => {
       // Non-retryable error (bare 4xx, etc.): don't retry.
       setFallbackHeaders(res, attempt, attemptLog);
->>>>>>> 4b96ea97b3909dfab19226b741319af5a83db76d
       res.status(502).json({
         error: {
           message: `Provider error (${route.displayName}): ${sanitizeProviderErrorMessage(err.message)}`,
