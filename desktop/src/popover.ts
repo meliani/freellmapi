@@ -5,7 +5,8 @@ import { BrowserWindow, type Tray } from 'electron';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const WIDTH = 316;
-const HEIGHT = 348;
+// +40 for the second action row (OpenAI / Claude base URLs, #1956).
+const HEIGHT = 388;
 
 let popover: BrowserWindow | null = null;
 
@@ -51,8 +52,16 @@ function createPopover(): BrowserWindow {
     },
   });
 
-  // Show over fullscreen apps, like every menu bar utility.
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // Follow the user across Spaces. `visibleOnFullScreen` is what lets the
+  // popover appear over another app's fullscreen Space, but Electron delivers
+  // it by transforming the process into a UI-element app — its own source says
+  // it "functionally mimics app.dock.hide()" — which silently removed the Dock
+  // icon the first time the popover opened. `skipTransformProcessType` keeps
+  // the collection behaviour and leaves the Dock icon to main.ts' showInDock.
+  // The cost: with the icon shown, macOS will not float the popover over
+  // someone else's fullscreen Space (a rule since 10.14). Users who turn the
+  // Dock icon off get that back, exactly as before.
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
 
   win.loadFile(path.join(__dirname, '../renderer/popover.html')).then(() => {
     if (process.platform !== 'darwin') {

@@ -118,6 +118,12 @@ function classifyIpv6(ip: string): AddressClass {
   if (h0 === 0x64 && h1 === 0xff9b && h2 === 0 && h3 === 0 && h4 === 0 && h5 === 0) {
     return classifyIpv4(embedded);
   }
+  // NAT64 local-use prefix (64:ff9b:1::/48, RFC 8215): an operator carves a
+  // translation prefix out of it, so the third hextet is non-zero, but the
+  // IPv4 address is still in the last 32 bits.
+  if (h0 === 0x64 && h1 === 0xff9b && h2 === 1) {
+    return classifyIpv4(embedded);
+  }
   if (AWS_IMDS_V6.every((h, i) => h === hextets[i])) return 'metadata';
   if ((h0 & 0xffc0) === 0xfe80) return 'link-local'; // fe80::/10
   if ((h0 & 0xfe00) === 0xfc00) return 'private'; // fc00::/7 (ULA)
@@ -131,6 +137,49 @@ export function classifyIp(ip: string): AddressClass {
   return 'public';
 }
 
+/**
+ * Hostname half of {@link isLoopbackOrPrivateUrl}: true when a bare hostname
+ * names THIS machine or the LAN. Callers that already parsed the URL (the
+ * proxy router, which needs the hostname for NO_PROXY anyway) use this
+ * directly so the URL is parsed once.
+ *
+ * Normalises the two spellings a URL hostname can arrive in: IPv6 literals are
+ * bracketed (`[::1]`), and the FQDN form carries a trailing dot (`localhost.`
+ * — a real, resolvable spelling that must not slip past as a public name).
+ */
+export function isLoopbackOrPrivateHostname(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (net.isIP(host)) {
+    const cls = classifyIp(host);
+    return cls === 'loopback' || cls === 'private';
+  }
+  return false;
+}
+
+/**
+ * Synchronous locality check for a stored provider base_url: true when the URL
+ * points at THIS machine or the LAN (loopback, RFC1918/ULA private, 'localhost').
+ * Used by the rate limiter to exempt local inference servers (Ollama/llama.cpp/
+ * LM Studio via the 'custom' platform) from cloud-quota cooldown ladders (#592):
+ * a local box has no quota, so long benches only strand the user's one route.
+ *
+ * Deliberately DNS-free so it can sit on the cooldown hot path: literal IPs and
+ * 'localhost'/'*.localhost' are decidable synchronously; any other hostname
+ * (LAN mDNS names included) is pragmatically treated as NON-local — the worst
+ * case there is the pre-existing conservative bench, never a wrong exemption.
+ */
+export function isLoopbackOrPrivateUrl(rawUrl: string | null | undefined): boolean {
+  if (!rawUrl) return false;
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  return isLoopbackOrPrivateHostname(url.hostname);
+}
+
 export interface UrlAssessment {
   allowed: boolean;
   reason?: string;
@@ -141,6 +190,13 @@ export interface AssessOptions {
   resolve?: (hostname: string) => Promise<string[]>;
   // Overrides the env flag; when true, loopback/private addresses are blocked.
   blockPrivate?: boolean;
+  // What to do when the hostname cannot be resolved (lookup error or no
+  // addresses). Defaults to blocking: a request-time check that cannot classify
+  // the target must not let the fetch go ahead and resolve it on its own
+  // (#1875). Only the save-time checks in routes/keys.ts pass true, so a LAN
+  // host that is offline right now can still be stored; every request to it is
+  // checked again, and blocked until it resolves.
+  allowUnresolved?: boolean;
 }
 
 async function defaultResolve(hostname: string): Promise<string[]> {
@@ -170,7 +226,10 @@ export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}
   // WHATWG URL canonicalises decimal/hex/octal IPv4 forms (http://2852039166/
   // parses to hostname 169.254.169.254), so classifying url.hostname covers
   // those encodings too. IPv6 literals arrive bracketed — strip for net.isIP.
-  const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  // A trailing dot (`metadata.google.internal.`) is the same name as the FQDN
+  // without it, so strip it before the denylist match, as
+  // isLoopbackOrPrivateHostname does.
+  const hostname = url.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
 
   if (METADATA_HOSTNAMES.has(hostname)) {
     return { allowed: false, reason: 'cloud metadata endpoints are not reachable through custom providers' };
@@ -183,11 +242,13 @@ export async function assessProviderUrl(rawUrl: string, opts: AssessOptions = {}
     try {
       addresses = await (opts.resolve ?? defaultResolve)(hostname);
     } catch {
-      // Unresolvable now may resolve later (device not on the LAN yet, DNS
-      // hiccup). Saving is harmless — the request-time check runs again.
-      return { allowed: true };
+      addresses = [];
     }
-    if (addresses.length === 0) return { allowed: true };
+    if (addresses.length === 0) {
+      return opts.allowUnresolved
+        ? { allowed: true }
+        : { allowed: false, reason: `could not resolve ${hostname}, so its address could not be checked` };
+    }
   }
 
   const blockPrivate = opts.blockPrivate ?? blockPrivateEnabled();

@@ -25,7 +25,9 @@
   }
   body.light {
     --fg: rgba(20, 20, 24, 0.92);
-    --fg-dim: rgba(20, 20, 24, 0.56);
+    /* 0.56 measured 4.1:1 on the light panel — just under AA for the small text
+       that uses it (version, Quit). 0.62 takes it to 5.0:1. */
+    --fg-dim: rgba(20, 20, 24, 0.62);
     --fg-faint: rgba(20, 20, 24, 0.34);
     --hairline: rgba(0, 0, 0, 0.10);
     --card: rgba(0, 0, 0, 0.05);
@@ -152,10 +154,14 @@
   }
   .switch.on { background: var(--ok); }
   .switch.on::after { left: 14px; }
+  /* The version is information, not decoration, so it may not sit at the
+     --fg-faint level the ornamental hairlines use: white at 32% over the solid
+     Windows panel is 2.9:1, well under the 4.5:1 needed to be readable (#703).
+     --fg-dim clears it in both themes (6.1:1 dark, 5.0:1 light). */
   .version {
     flex: none;
     margin-left: auto;
-    color: var(--fg-faint);
+    color: var(--fg-dim);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
@@ -205,8 +211,13 @@
 
     <div class="actions">
       <button class="primary" id="open">Open Dashboard</button>
-      <button class="ghost" id="copyurl">Copy URL</button>
       <button class="ghost" id="copykey">Copy Key</button>
+    </div>
+    <!-- Two base URLs (#1956): OpenAI clients want /v1, Claude / Anthropic
+         clients want the bare origin and append /v1 themselves. -->
+    <div class="actions">
+      <button class="ghost" id="copyurl-openai" title="Base URL ending in /v1, for OpenAI-compatible clients">Copy OpenAI URL</button>
+      <button class="ghost" id="copyurl-claude" title="Base URL without /v1, for Claude Desktop, Claude Code and Anthropic SDKs">Copy Claude URL</button>
     </div>
 
     <div class="foot">
@@ -263,7 +274,10 @@
     setText('l-tokens', S.tokensToday);
     setText('lastmodel-label', S.lastModel);
     setText('open', S.openDashboard);
-    setText('copyurl', S.copyUrl);
+    setText('copyurl-openai', S.copyOpenAiUrl);
+    setText('copyurl-claude', S.copyClaudeUrl);
+    if (S.openAiUrlHint) $('copyurl-openai').title = S.openAiUrlHint;
+    if (S.claudeUrlHint) $('copyurl-claude').title = S.claudeUrlHint;
     setText('copykey', S.copyKey);
     setText('login-label', S.startAtLogin);
     setText('quit', S.quit);
@@ -287,7 +301,8 @@
   }
 
   $('open').addEventListener('click', () => window.freeapi.openDashboard());
-  $('copyurl').addEventListener('click', (e) => { window.freeapi.copyBaseUrl(); flash(e.target, S.copied || 'Copied ✓'); });
+  $('copyurl-openai').addEventListener('click', (e) => { window.freeapi.copyBaseUrl('openai'); flash(e.target, S.copied || 'Copied ✓'); });
+  $('copyurl-claude').addEventListener('click', (e) => { window.freeapi.copyBaseUrl('anthropic'); flash(e.target, S.copied || 'Copied ✓'); });
   $('copykey').addEventListener('click', (e) => { window.freeapi.copyApiKey(); flash(e.target, S.copied || 'Copied ✓'); });
   $('quit').addEventListener('click', () => window.freeapi.quit());
   $('login').addEventListener('click', () => {

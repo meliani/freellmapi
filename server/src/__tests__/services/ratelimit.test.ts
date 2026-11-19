@@ -145,14 +145,16 @@ describe('Rate Limiter', () => {
       ).toBe(90 * 1000);
     });
 
-    it('escalates null-limit 429s through the same ladder as documented RPD exhaustion', () => {
+    it('escalates null-limit 429s only as far as the unknown-limit 10m cap', () => {
       // Documented RPD path (see "escalates only once the daily request limit
       // is actually reached"): 1st call after counter ≥ limit → 2min (idx=0),
       // 2nd → 10min (idx=1), 3rd → HOUR (idx=2), 4th+ → DAY (idx=3).
       //
-      // Null-limit path mirrors that sequence starting at the 2nd 429 (1st
-      // is transient — no signal yet). Uses an independent counter so the
-      // ladder index isn't inflated by the heuristic's own hits.
+      // Null-limit path enters that ladder at the 2nd 429 (1st is transient —
+      // no signal yet) but is capped at 10min: with no published RPD/TPD the
+      // "exhausted" verdict is inferred from repeated 429s alone, and RPM
+      // jitter is indistinguishable from a spent daily quota, so the guess is
+      // never allowed to reach the 1h/24h quarantine steps.
       const id = Math.floor(Math.random() * 1_000_000);
       const platform = 'ollama';
       const model = `nolimit-esc-${id}`;
@@ -162,12 +164,26 @@ describe('Rate Limiter', () => {
       expect(getCooldownDurationForLimit(platform, model, id, { rpd: null, tpd: null })).toBe(2 * 60 * 1000);
       // 3rd 429 → 10min (idx=1)
       expect(getCooldownDurationForLimit(platform, model, id, { rpd: null, tpd: null })).toBe(10 * 60 * 1000);
-      // 4th 429 → HOUR (idx=2)
-      expect(getCooldownDurationForLimit(platform, model, id, { rpd: null, tpd: null })).toBe(60 * 60 * 1000);
-      // 5th 429 → DAY (idx=3, capped)
-      expect(getCooldownDurationForLimit(platform, model, id, { rpd: null, tpd: null })).toBe(24 * 60 * 60 * 1000);
-      // 6th+ stays at DAY
-      expect(getCooldownDurationForLimit(platform, model, id, { rpd: null, tpd: null })).toBe(24 * 60 * 60 * 1000);
+      // 4th 429 — ladder says HOUR, cap holds it at 10min
+      expect(getCooldownDurationForLimit(platform, model, id, { rpd: null, tpd: null })).toBe(10 * 60 * 1000);
+      // 5th 429 — ladder says DAY, cap holds it at 10min
+      expect(getCooldownDurationForLimit(platform, model, id, { rpd: null, tpd: null })).toBe(10 * 60 * 1000);
+      // 6th+ stays at the cap, never the 24h quarantine
+      expect(getCooldownDurationForLimit(platform, model, id, { rpd: null, tpd: null })).toBe(10 * 60 * 1000);
+    });
+
+    it('keeps the full 24h ladder for a model with a real, exhausted RPD', () => {
+      // The cap is for GUESSED exhaustion only. A published rpd whose counter
+      // is spent is measured evidence, so the quarantine steps stay reachable.
+      const id = Math.floor(Math.random() * 1_000_000);
+      const platform = 'openrouter';
+      const model = `daily-esc-${id}`;
+      for (let i = 0; i < 3; i++) recordRequest(platform, model, id);
+      const limits = { rpd: 3, tpd: null };
+      expect(getCooldownDurationForLimit(platform, model, id, limits)).toBe(2 * 60 * 1000);
+      expect(getCooldownDurationForLimit(platform, model, id, limits)).toBe(10 * 60 * 1000);
+      expect(getCooldownDurationForLimit(platform, model, id, limits)).toBe(60 * 60 * 1000);
+      expect(getCooldownDurationForLimit(platform, model, id, limits)).toBe(24 * 60 * 60 * 1000);
     });
 
     it('does NOT trigger the heuristic when limits are known (even after 5+ hits)', () => {
@@ -264,6 +280,10 @@ describe('Rate Limiter', () => {
     it('defaults to OpenRouter ~1000/day and allows env override / disable', () => {
       delete process.env[ENV];
       expect(getProviderDailyRequestCap('openrouter')).toBe(1000);
+      // ModelScope: ~250 魔粒/day ÷ 2 per request ≈ 125/day upstream, shipped as 100 for margin.
+      expect(getProviderDailyRequestCap('modelscope')).toBe(100);
+      // Requesty: 200/day across all free models, shipped as 180 for margin.
+      expect(getProviderDailyRequestCap('requesty')).toBe(180);
       expect(getProviderDailyRequestCap('groq')).toBeNull(); // no shared cap
       process.env[ENV] = '50';
       expect(getProviderDailyRequestCap('openrouter')).toBe(50);
@@ -287,6 +307,15 @@ describe('Rate Limiter', () => {
       expect(canUseProvider('openrouter', testId)).toBe(true); // 2 < 3
       recordRequest('openrouter', 'model-c', testId);
       expect(canUseProvider('openrouter', testId)).toBe(false); // 3 >= 3
+    });
+
+    it('shares the Requesty daily cap across its free models by default', () => {
+      for (let i = 0; i < 179; i++) {
+        recordRequest('requesty', i % 2 ? 'google/gemma-4-31b-it' : 'nvidia/nemotron-3-super-120b-a12b', testId);
+      }
+      expect(canUseProvider('requesty', testId)).toBe(true); // 179 < 180
+      recordRequest('requesty', 'mistral/leanstral-1-5', testId);
+      expect(canUseProvider('requesty', testId)).toBe(false); // 180 >= 180
     });
   });
 
@@ -313,7 +342,7 @@ describe('Rate Limiter', () => {
           'navy', ?, ?, 1, 1, 'Large', 20, NULL, NULL, ?,
           ?, NULL, 1, 0, 1
         )
-        ON CONFLICT(platform, model_id) DO UPDATE SET
+        ON CONFLICT(platform, model_id, endpoint_scope) DO UPDATE SET
           tpd_limit = excluded.tpd_limit,
           monthly_token_budget = excluded.monthly_token_budget
       `).run(modelId, `${modelId} (NavyAI)`, tpdLimit, monthlyTokenBudget);
@@ -401,5 +430,23 @@ describe('parseRetryAfterMs', () => {
     expect(parseRetryAfterMs(null)).toBeUndefined();
     expect(parseRetryAfterMs('')).toBeUndefined();
     expect(parseRetryAfterMs('soon')).toBeUndefined();
+  });
+
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  it('clamps an absurd delta-seconds value to 24h', () => {
+    // Feeds the cooldown expiry directly, so an unclamped value benches the key
+    // effectively forever.
+    expect(parseRetryAfterMs('99999999999')).toBe(DAY_MS);
+    expect(parseRetryAfterMs(String(DAY_MS / 1000 + 1))).toBe(DAY_MS);
+  });
+
+  it('clamps a far-future HTTP-date to 24h', () => {
+    expect(parseRetryAfterMs(new Date(Date.now() + 30 * DAY_MS).toUTCString())).toBe(DAY_MS);
+  });
+
+  it('leaves values at or under 24h untouched', () => {
+    expect(parseRetryAfterMs(String(DAY_MS / 1000))).toBe(DAY_MS);
+    expect(parseRetryAfterMs('3600')).toBe(3_600_000);
   });
 });
