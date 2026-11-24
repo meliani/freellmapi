@@ -583,9 +583,12 @@ async function callImageProvider(
       return (j.artifacts ?? []).map(a => ({ b64_json: a.base64 }));
     }
     case 'pollinations': {
-      // Keyless GET image endpoint returns raw image bytes.
-      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(p.prompt)}?width=${w}&height=${h}&nologo=true&model=${encodeURIComponent(row.model_id)}`;
-      const r = await mediaFetch(url, 'pollinations', 'image', { method: 'GET' });
+      // GET returns raw image bytes. With an account key: the authenticated gen API
+      // (own pollen balance, no keyless "Free limit"); without one: the keyless endpoint.
+      const q = `${encodeURIComponent(p.prompt)}?width=${w}&height=${h}&nologo=true&model=${encodeURIComponent(row.model_id)}`;
+      const url = key ? `https://gen.pollinations.ai/image/${q}` : `https://image.pollinations.ai/prompt/${q}`;
+      const r = await mediaFetch(url, 'pollinations', 'image', key
+        ? { method: 'GET', headers: { Authorization: `Bearer ${key}` } } : { method: 'GET' });
       const buf = Buffer.from(await r.arrayBuffer());
       return [{ b64_json: buf.toString('base64') }];
     }
@@ -1339,7 +1342,12 @@ export async function runImageGeneration(model: string | undefined, params: Imag
   for (const row of chain) {
     const tried = new Set<number>();
     do {
-      const { credential, budgetBlocked, cooldownBlocked, cooldownRetryAfterMs } = KEYLESS_CAPABLE.has(row.platform)
+      // A keyless-capable platform still uses its key when one is configured (Pollinations).
+      const reserved = row.platform === 'pollinations' && tried.size === 0
+        ? reserveProviderCredential(row, 0, keyId => tried.has(keyId)) : null;
+      const { credential, budgetBlocked, cooldownBlocked, cooldownRetryAfterMs } = reserved?.credential
+        ? reserved
+        : KEYLESS_CAPABLE.has(row.platform)
         ? { credential: { id: null, key: null, baseUrl: null, release: () => {} }, budgetBlocked: false, cooldownBlocked: false, cooldownRetryAfterMs: undefined }
         : reserveProviderCredential(row, 0, keyId => tried.has(keyId)
           // the reservation checks cooldowns for custom endpoints only; a benched

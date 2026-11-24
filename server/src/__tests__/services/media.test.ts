@@ -262,6 +262,18 @@ describe('media service', () => {
       expect(body).not.toHaveProperty('cfg_scale');
     });
 
+    it('Pollinations: with an account key, uses the authenticated gen API', async () => {
+      addMedia('pollinations', 'flux', 'image');
+      addKey('pollinations', 'sk_pollinations_img');
+      const fetchMock = vi.fn(async () =>
+        new Response(Buffer.from('PNGDATA'), { status: 200, headers: { 'content-type': 'image/jpeg' } }));
+      globalThis.fetch = fetchMock as any;
+      const r = await runImageGeneration('flux', { prompt: 'a cat' });
+      expect(r.images[0].b64_json).toBe(Buffer.from('PNGDATA').toString('base64'));
+      expect(String(fetchMock.mock.calls[0][0])).toContain('https://gen.pollinations.ai/image/a%20cat?');
+      expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toEqual({ Authorization: 'Bearer sk_pollinations_img' });
+    });
+
     it('Pollinations: keyless GET, raw bytes → b64_json (no api key needed)', async () => {
       addMedia('pollinations', 'flux', 'image');
       globalThis.fetch = vi.fn(async () =>
