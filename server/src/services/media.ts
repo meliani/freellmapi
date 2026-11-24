@@ -1341,7 +1341,10 @@ export async function runImageGeneration(model: string | undefined, params: Imag
     do {
       const { credential, budgetBlocked, cooldownBlocked, cooldownRetryAfterMs } = KEYLESS_CAPABLE.has(row.platform)
         ? { credential: { id: null, key: null, baseUrl: null, release: () => {} }, budgetBlocked: false, cooldownBlocked: false, cooldownRetryAfterMs: undefined }
-        : reserveProviderCredential(row, 0, keyId => tried.has(keyId));
+        : reserveProviderCredential(row, 0, keyId => tried.has(keyId)
+          // the reservation checks cooldowns for custom endpoints only; a benched
+          // (spent) Cloudflare account must be skipped here
+          || (row.platform === 'cloudflare' && isOnCooldown(row.platform, row.model_id, keyId)));
       if (!credential) {
         if (budgetBlocked) {
           lastError = new MediaError('Monthly key budget exhausted', 429, 'quota_exceeded');
