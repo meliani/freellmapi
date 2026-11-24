@@ -34,7 +34,8 @@ import { solariaTranscription } from './media-solaria.js';
 import { FreeTtsMediaError, freeTtsSpeech } from './media-freetts.js';
 import { VoiceGatewayMediaError, voiceGatewaySpeech, cartesiaTranscription } from './media-voice-gateways.js';
 import { cpuCanRunSharp } from '../lib/image-normalize.js';
-import { meterCloudflare, type CloudflareNeuronCapError } from './cloudflare-neurons.js';
+import { meterCloudflare, msUntilUtcMidnight, type CloudflareNeuronCapError } from './cloudflare-neurons.js';
+import { benchCloudflareAccount, isCloudflareNeuronsExhausted } from './cloudflare-daily-quota.js';
 
 /** Platforms with a media adapter below. catalog-sync gates media rows on this
  *  (decoupled from the chat provider registry — e.g. SiliconFlow is media-only). */
@@ -1324,13 +1325,20 @@ export async function runImageGeneration(model: string | undefined, params: Imag
         if (row.platform === 'custom' && e.status === 429 && credential.id != null) {
           setCooldown(row.platform, row.model_id, credential.id, e.retryAfterMs);
         }
+        if (row.platform === 'cloudflare' && e.status === 429 && credential.id != null) {
+          // Neurons spent: bench the whole account until UTC midnight (images now skip
+          // benched keys), then the loop tries the next account. Other 429: short bench.
+          const ms = isCloudflareNeuronsExhausted(e) ? msUntilUtcMidnight() : (e.retryAfterMs ?? 60_000);
+          setCooldown(row.platform, row.model_id, credential.id, ms);
+          if (credential.key) benchCloudflareAccount(credential.key, e, ms, 'heuristic');
+        }
         lastError = e;
         hints.record(e.status, e.retryAfterMs);
         if (![401, 402, 403, 429].includes(e.status)) break;
       } finally {
         credential.release();
       }
-    } while (row.platform === 'custom');
+    } while (row.platform === 'custom' || row.platform === 'cloudflare');
   }
   throw chainError('image', lastError, hints);
 }

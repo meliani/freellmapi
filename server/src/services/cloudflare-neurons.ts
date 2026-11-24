@@ -73,6 +73,12 @@ export const CLOUDFLARE_PRICES: Record<string, CloudflarePrice> = {
   '@cf/google/gemma-4-26b-a4b-it': { inputPerM: 0.1, outputPerM: 0.3 },
   '@cf/google/embeddinggemma-2': { inputPerM: 0.0017 },
   '@cf/huggingface/distilbert-sst-2-int8': { inputPerM: 0.0263 },
+  // FLUX (workers-ai/platform/pricing, 2026-11-24). FLUX.2 [dev] bills per output tile PER STEP
+  // (4 tiles x ~25 steps x $0.00041) and [klein] 9B per megapixel: flat per-image estimates.
+  '@cf/black-forest-labs/flux-1-schnell': { perTile: 0.0000528, perStep: 0.0001056 },
+  '@cf/black-forest-labs/flux-2-dev': { perRequest: 0.041 },
+  '@cf/black-forest-labs/flux-2-klein-4b': { perTile: 0.000287 },
+  '@cf/black-forest-labs/flux-2-klein-9b': { perRequest: 0.015 },
   '@cf/leonardo/lucid-origin': { perTile: 0.007, perStep: 0.000132 },
   '@cf/leonardo/phoenix-1.0': { perTile: 0.00583, perStep: 0.00011 },
   '@cf/meta/llama-3.1-8b-instruct-fp8': { inputPerM: 0.152, outputPerM: 0.287 },

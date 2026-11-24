@@ -283,6 +283,22 @@ describe('media service', () => {
       expect(JSON.parse(String(init.body))).toEqual({ prompt: 'x' });
     });
 
+    it('Cloudflare: a spent account (daily neurons 429) fails over to the next account', async () => {
+      addMedia('cloudflare', '@cf/black-forest-labs/flux-1-schnell', 'image');
+      addKey('cloudflare', 'acctspent:tok1');
+      addKey('cloudflare', 'acctfresh:tok2');
+      const fetchMock = vi.fn(async (url: any) => String(url).includes('acctspent')
+        ? new Response(JSON.stringify({ errors: [{ message: 'AiError: you have used up your daily free allocation of 10,000 neurons' }] }), { status: 429 })
+        : jsonResponse({ result: { image: 'FRESHB64' }, success: true }));
+      globalThis.fetch = fetchMock as any;
+      const first = await runImageGeneration('@cf/black-forest-labs/flux-1-schnell', { prompt: 'x' });
+      const second = await runImageGeneration('@cf/black-forest-labs/flux-1-schnell', { prompt: 'y' });
+      expect(first.images[0].b64_json).toBe('FRESHB64');
+      expect(second.images[0].b64_json).toBe('FRESHB64');
+      // the spent account is benched: tried at most once over both requests
+      expect(fetchMock.mock.calls.filter(c => String(c[0]).includes('acctspent')).length).toBeLessThanOrEqual(1);
+    });
+
     it('Cloudflare: requestStyle multipart sends form-data (FLUX.2 rejects JSON)', async () => {
       addMedia('cloudflare', '@cf/black-forest-labs/flux-2-klein-4b', 'image', 1, null,
         JSON.stringify({ requestStyle: 'multipart' }));
